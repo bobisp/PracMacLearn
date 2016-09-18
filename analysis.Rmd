@@ -1,0 +1,84 @@
+---
+title: "Weight Lifting Activity Recognition"
+author: "Bob Perez"
+date: "August 25, 2016"
+output: html_document
+---
+
+## Introduction
+Six young healthy participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4IOcwzDeZ
+
+
+## Pre-processing
+```{r message=FALSE}
+library(caret)
+dataTrain <- read.csv('pml-training.csv')
+```
+After loading the caret package and reading in the data (downloadable from the url above) and using *str(dataTrain)*, of the 160 variables some are factor type and others numeric type.  Excluding the first seven columns on theoretical grounds, the rest are converted to numeric types and stored as a new object, *datForm*.
+```{r warning=FALSE}
+datForm <- as.data.frame(apply(dataTrain[,-c(1,2,3,4,5,6,7,160)],2,as.numeric))
+datForm <- cbind(datForm, dataTrain$classe)
+names(datForm)[153] = "classe"
+```
+
+Upon preliminary observation there appeared to be some variable columns that consisted almost entirely of missing data.  These variables were identified below:
+```{r}
+numNa <- apply(as.data.frame(apply(datForm,2,is.na)),2,sum)
+perNa <- sapply(numNa,function(x) round(x/19622, 2))
+
+head(names(perNa)[which(perNa > .7)])
+```
+And the removed from the dataset:
+```{r}
+exclude <- names(perNa)[which(perNa > .7)]
+datForm <- datForm[,!names(datForm) %in% exclude]
+```
+
+
+## Model Training
+
+```{r cache = TRUE}
+set.seed(4432)
+
+inTrain <- createDataPartition(y=datForm$classe, p=0.75, list=FALSE)
+training <- datForm[inTrain,]
+testing <- datForm[-inTrain,]
+
+trC<- trainControl(method="boot632", number=10, savePredictions = "final")
+```
+After setting the seed to ensure reproducibility, the data is partitioned into training and testing subsets.  To cross-validate potential models a 10 repetition bootstrap resampling is stored are a training control parameter, *trC*.
+
+
+Three machine learning algorithms are computed, each with centered and scaled data: partial least squares, random forest, and high dimensional discriminant analysis.
+```{r cache = TRUE, results='hide'}
+modFitPLS <- train(classe ~ ., data = training, method = "pls",preProc = c("center","scale"), trControl = trC)
+
+modFitRF <- train(classe ~ ., data = training, method = "rf",preProc = c("center","scale"), trControl = trC)
+
+modFitHDDA <- train(classe ~ ., data = training, method = "hdda",preProc = c("center","scale"), trControl = trC)
+
+```
+
+## Model Selection
+
+Each of the fitted models is then used to predict the classe of the *testing* set variables which was set aside earlier and the confusion matrices are displayed to assess performance: 
+```{r cache = TRUE}
+predPLS <- predict(modFitPLS,newdata = testing)
+confusionMatrix(predPLS, testing$classe)
+
+predRF <- predict(modFitRF,newdata = testing)
+confusionMatrix(predRF, testing$classe)
+
+predHDDA <- predict(modFitHDDA,newdata = testing)
+confusionMatrix(predHDDA, testing$classe)
+```
+
+
+Clearly, the random forest model exceeds the others and achieves a high degree of accuracy.  Based on this assessment, one might expect the out of sample error to be around 1% or less when using the random forest. 
+
+## Conclusion
+For this dataset the random forest method seems well suited to prediction.  It is, however, the most computationally demanding of the three approachs used in this report and, due to this, the reduction of 159 potential predictors down to the 52 that were used was important.  Further analysis might try to further reduce the number of predictors by either careful selection or principal component analysis.
